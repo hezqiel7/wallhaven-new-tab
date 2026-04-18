@@ -22,6 +22,13 @@
   ⚙
 </button>
 
+  <div id="statusMessage" class="hidden" role="status" aria-live="polite"></div>
+
+  <nav id="favoritesDock" class="hidden" aria-label="Favoritos">
+    <button id="favoritesToggle" aria-label="Favoritos" title="Favoritos">★</button>
+    <ul id="favoritesMenu" class="favorites-menu root"></ul>
+  </nav>
+
   <div id="settingsPanel" class="hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <form id="settingsForm">
       <h2 id="settingsTitle">Wallhaven</h2>
@@ -35,6 +42,10 @@
         Busqueda (q)
         <input id="queryInput" name="query" type="text" autocomplete="off" placeholder="landscape -logo">
       </label>
+
+      <div class="results-row">
+        <span id="resultsInfo">Resultados estimados: -</span>
+      </div>
 
       <fieldset>
         <legend>Categorias</legend>

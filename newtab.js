@@ -5,6 +5,7 @@
   const SETTINGS_KEY = "wh_newtab_settings_v1";
   const HISTORY_KEY = "wh_newtab_history_v1";
   const HISTORY_LIMIT = 120;
+  const MAX_QUERY_GROUPS = 5;
   const API_BASE_URL = "https://wallhaven.cc/api/v1/search";
   const DEFAULT_SETTINGS = {
     apiKey: "",
@@ -34,9 +35,13 @@
   const nextBtn = document.getElementById("nextBtn");
   const saveBtn = document.getElementById("saveBtn");
   const settingsBtn = document.getElementById("settingsBtn");
+  const statusMessage = document.getElementById("statusMessage");
+  const favoritesDock = document.getElementById("favoritesDock");
+  const favoritesMenu = document.getElementById("favoritesMenu");
   const settingsPanel = document.getElementById("settingsPanel");
   const settingsForm = document.getElementById("settingsForm");
   const cancelSettingsBtn = document.getElementById("cancelSettingsBtn");
+  const resultsInfo = document.getElementById("resultsInfo");
 
   const apiKeyInput = document.getElementById("apiKeyInput");
   const queryInput = document.getElementById("queryInput");
@@ -59,6 +64,11 @@
   let currentWallpaperId = "";
   let activeLayerIndex = 0;
   let currentSettings = null;
+  let prefetchedWallpaper = null;
+  let prefetchPromise = null;
+  let autoResultsTimer = null;
+  let lastResultsCheckSig = "";
+  const MAX_BOOKMARK_NODES = 400;
 
   function now() {
     return Date.now();
@@ -103,6 +113,111 @@
       return;
     }
     localStorage.removeItem(HISTORY_KEY);
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function bookmarksGetChildren(id) {
+    return new Promise((resolve, reject) => {
+      chrome.bookmarks.getChildren(id, (nodes) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(Array.isArray(nodes) ? nodes : []);
+      });
+    });
+  }
+
+  async function buildBookmarkTree(nodes, budgetRef) {
+    if (!Array.isArray(nodes) || !nodes.length || budgetRef.count <= 0) {
+      return [];
+    }
+
+    const out = [];
+    for (const node of nodes) {
+      if (!node || budgetRef.count <= 0) {
+        continue;
+      }
+
+      if (node.url) {
+        out.push({
+          title: node.title || node.url,
+          url: node.url
+        });
+        budgetRef.count -= 1;
+        continue;
+      }
+
+      if (!node.id) {
+        continue;
+      }
+
+      try {
+        const childrenRaw = await bookmarksGetChildren(node.id);
+        const children = await buildBookmarkTree(childrenRaw, budgetRef);
+        if (children.length) {
+          out.push({
+            title: node.title || "Carpeta",
+            children
+          });
+        }
+      } catch {
+        // ignore folder read errors
+      }
+    }
+
+    return out;
+  }
+
+  function renderFavoritesMenu(nodes) {
+    if (!Array.isArray(nodes) || !nodes.length) {
+      return "";
+    }
+
+    return nodes.map((node) => {
+      if (node.url) {
+        const title = escapeHtml(node.title || node.url);
+        const url = escapeHtml(node.url);
+        return `<li><a class="favorites-link" href="${url}" title="${title}">${title}</a></li>`;
+      }
+
+      const title = escapeHtml(node.title || "Carpeta");
+      const children = renderFavoritesMenu(node.children || []);
+      if (!children) {
+        return "";
+      }
+
+      return `<li class="favorites-folder"><span class="favorites-folder-label" title="${title}">${title}</span><ul class="favorites-menu">${children}</ul></li>`;
+    }).join("");
+  }
+
+  async function loadFavorites() {
+    try {
+      const topLevel = await bookmarksGetChildren("1");
+      const budgetRef = { count: MAX_BOOKMARK_NODES };
+      const tree = await buildBookmarkTree(topLevel, budgetRef);
+      const html = renderFavoritesMenu(tree);
+
+      if (!html) {
+        favoritesDock.classList.add("hidden");
+        favoritesMenu.innerHTML = "";
+        return;
+      }
+
+      favoritesMenu.innerHTML = html;
+      favoritesDock.classList.remove("hidden");
+    } catch {
+      favoritesDock.classList.add("hidden");
+      favoritesMenu.innerHTML = "";
+    }
   }
 
   function mergeSettings(raw) {
@@ -311,6 +426,161 @@
     });
   }
 
+  function clearPrefetchQueue() {
+    prefetchedWallpaper = null;
+  }
+
+  function setResultsInfo(text) {
+    resultsInfo.textContent = text;
+  }
+
+  function setResultsInfoTone(tone) {
+    resultsInfo.classList.remove("pool-none", "pool-low", "pool-medium", "pool-good");
+    if (tone) {
+      resultsInfo.classList.add(tone);
+    }
+  }
+
+  function poolTone(total) {
+    if (total <= 0) return "pool-none";
+    if (total < 50) return "pool-low";
+    if (total < 300) return "pool-medium";
+    return "pool-good";
+  }
+
+  function resultsCheckSignature(settings) {
+    return JSON.stringify({
+      apiKey: settings.apiKey,
+      query: settings.query,
+      categories: settings.categories,
+      purity: settings.purity,
+      sorting: settings.sorting,
+      topRange: settings.topRange,
+      atleast: settings.atleast,
+      ratios: settings.ratios
+    });
+  }
+
+  async function updateSearchResultsInfo(settings, force = false) {
+    const sig = resultsCheckSignature(settings);
+    if (!force && sig === lastResultsCheckSig) {
+      return;
+    }
+
+    lastResultsCheckSig = sig;
+    setResultsInfoTone("");
+    setResultsInfo("Resultados estimados: comprobando...");
+
+    const headers = {};
+    if (settings.apiKey) {
+      headers["X-API-Key"] = settings.apiKey;
+    }
+
+    try {
+      const queries = parseQueryGroups(settings.query);
+      let combinedTotal = 0;
+      let hasTotal = false;
+
+      for (const query of queries) {
+        const json = await requestSearchPage(settings, headers, 1, query);
+        const total = Number(json?.meta?.total);
+        if (Number.isFinite(total) && total >= 0) {
+          hasTotal = true;
+          combinedTotal += total;
+        }
+      }
+
+      if (!hasTotal) {
+        setResultsInfoTone("");
+        setResultsInfo("Resultados estimados: no disponible");
+        return;
+      }
+
+      const text = combinedTotal.toLocaleString("es-ES");
+      setResultsInfoTone(poolTone(combinedTotal));
+      setResultsInfo(`Resultados estimados: ${text}`);
+    } catch {
+      setResultsInfoTone("");
+      setResultsInfo("Resultados estimados: error de consulta");
+    }
+  }
+
+  function scheduleAutoResultsCheck(immediate = false) {
+    if (autoResultsTimer) {
+      clearTimeout(autoResultsTimer);
+      autoResultsTimer = null;
+    }
+
+    if (settingsPanel.classList.contains("hidden")) {
+      return;
+    }
+
+    const run = async () => {
+      const settings = getSettingsFromForm();
+      await updateSearchResultsInfo(settings);
+    };
+
+    if (immediate) {
+      run();
+      return;
+    }
+
+    autoResultsTimer = setTimeout(() => {
+      autoResultsTimer = null;
+      run();
+    }, 500);
+  }
+
+  function showStatusMessage(text) {
+    statusMessage.textContent = text;
+    statusMessage.classList.remove("hidden");
+  }
+
+  function hideStatusMessage() {
+    statusMessage.textContent = "";
+    statusMessage.classList.add("hidden");
+  }
+
+  function createNoResultsError() {
+    const error = new Error("No wallpapers returned for current query");
+    error.code = "NO_RESULTS";
+    return error;
+  }
+
+  function canUsePrefetched(settingsSig) {
+    return !!prefetchedWallpaper
+      && prefetchedWallpaper.settingsSig === settingsSig
+      && !!prefetchedWallpaper.imageUrl
+      && prefetchedWallpaper.imageUrl !== currentImageUrl;
+  }
+
+  function ensurePrefetch(settingsSig) {
+    if (prefetchPromise || !currentSettings) {
+      return;
+    }
+
+    const snapshot = currentSettings;
+    const snapshotSig = settingsSig || settingsSignature(snapshot);
+
+    prefetchPromise = (async () => {
+      try {
+        const payload = await fetchWallpaper(snapshot, snapshotSig, currentImageUrl);
+        const preloadedMeta = await preloadImage(payload.imageUrl);
+        if (!currentSettings || settingsSignature(currentSettings) !== snapshotSig) {
+          return;
+        }
+        prefetchedWallpaper = {
+          ...payload,
+          preloadedMeta
+        };
+      } catch {
+        prefetchedWallpaper = null;
+      } finally {
+        prefetchPromise = null;
+      }
+    })();
+  }
+
   function fileNameFromUrl(url) {
     try {
       const clean = url.split("?")[0];
@@ -328,10 +598,25 @@
     return `${purity.sfw ? "1" : "0"}${purity.sketchy ? "1" : "0"}${purity.nsfw ? "1" : "0"}`;
   }
 
-  function buildSearchUrl(settings, page) {
+  function parseQueryGroups(query) {
+    if (typeof query !== "string") {
+      return [""];
+    }
+
+    const groups = query
+      .split(",")
+      .map((value) => value.trim().replace(/\s+/g, " "))
+      .filter((value) => value.length > 0)
+      .slice(0, MAX_QUERY_GROUPS);
+
+    return groups.length ? groups : [""];
+  }
+
+  function buildSearchUrl(settings, page, queryOverride) {
     const params = new URLSearchParams();
-    if (settings.query) {
-      params.set("q", settings.query);
+    const effectiveQuery = typeof queryOverride === "string" ? queryOverride : settings.query;
+    if (effectiveQuery) {
+      params.set("q", effectiveQuery);
     }
     params.set("categories", categoryBits(settings.categories));
     params.set("purity", purityBits(settings.purity));
@@ -380,8 +665,8 @@
     return randomInt(1, lastPage);
   }
 
-  async function requestSearchPage(settings, headers, page) {
-    const res = await fetch(buildSearchUrl(settings, page), {
+  async function requestSearchPage(settings, headers, page, queryOverride) {
+    const res = await fetch(buildSearchUrl(settings, page, queryOverride), {
       method: "GET",
       cache: "no-store",
       headers
@@ -405,10 +690,22 @@
       seenIds.add(currentWallpaperId);
     }
 
+    const queries = parseQueryGroups(settings.query);
+    const randomQueryOffset = randomInt(0, queries.length - 1);
+    let hasAnyResults = false;
+
     let lastPage = 1;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const page = pickPage(attempt, lastPage);
-      const json = await requestSearchPage(settings, headers, page);
+      const query = queries[(attempt + randomQueryOffset) % queries.length];
+      const json = await requestSearchPage(settings, headers, page, query);
+      const total = Number(json?.meta?.total);
+      if (Number.isFinite(total) && total <= 0) {
+        continue;
+      }
+      if (Number.isFinite(total) && total > 0) {
+        hasAnyResults = true;
+      }
       const parsedLastPage = Number(json?.meta?.last_page);
       if (Number.isFinite(parsedLastPage) && parsedLastPage > 0) {
         lastPage = Math.min(parsedLastPage, 1000);
@@ -437,28 +734,44 @@
     }
 
     clearHistory(currentWallpaperId);
-    const fallbackJson = await requestSearchPage(settings, headers, 1);
-    const fallbackItem = pickItem(fallbackJson?.data, avoidUrl, new Set());
 
-    if (!fallbackItem?.path) {
-      throw new Error("No wallpaper returned by Wallhaven");
+    for (const query of queries) {
+      const fallbackJson = await requestSearchPage(settings, headers, 1, query);
+      const fallbackTotal = Number(fallbackJson?.meta?.total);
+      if (Number.isFinite(fallbackTotal) && fallbackTotal > 0) {
+        hasAnyResults = true;
+      }
+      if (Number.isFinite(fallbackTotal) && fallbackTotal <= 0) {
+        continue;
+      }
+
+      const fallbackItem = pickItem(fallbackJson?.data, avoidUrl, new Set());
+      if (!fallbackItem?.path) {
+        continue;
+      }
+
+      const imageUrl = fallbackItem.path;
+      const fileName = fileNameFromUrl(imageUrl);
+
+      const payload = {
+        ts: now(),
+        imageUrl,
+        fileName,
+        wallpaperId: fallbackItem.id || "",
+        width: Number(fallbackItem.dimension_x) || 0,
+        height: Number(fallbackItem.dimension_y) || 0,
+        settingsSig
+      };
+
+      setCache(payload);
+      return payload;
     }
 
-    const imageUrl = fallbackItem.path;
-    const fileName = fileNameFromUrl(imageUrl);
+    if (!hasAnyResults) {
+      throw createNoResultsError();
+    }
 
-    const payload = {
-      ts: now(),
-      imageUrl,
-      fileName,
-      wallpaperId: fallbackItem.id || "",
-      width: Number(fallbackItem.dimension_x) || 0,
-      height: Number(fallbackItem.dimension_y) || 0,
-      settingsSig
-    };
-
-    setCache(payload);
-    return payload;
+    throw new Error("No wallpaper returned by Wallhaven");
   }
 
   saveBtn.addEventListener("click", () => {
@@ -517,6 +830,7 @@
 
   function openSettings() {
     setFormFromSettings(currentSettings);
+    updateSearchResultsInfo(currentSettings, true);
     settingsPanel.classList.remove("hidden");
   }
 
@@ -530,10 +844,21 @@
     const ttlMs = cacheTtlMs(currentSettings);
 
     if (!force && isFresh(cache, settingsSig, ttlMs)) {
+      hideStatusMessage();
       applyWallpaper(cache.imageUrl, cache.fileName, cache.wallpaperId, {
         width: cache.width,
         height: cache.height
       });
+      ensurePrefetch(settingsSig);
+      return;
+    }
+
+    if (force && canUsePrefetched(settingsSig)) {
+      const queued = prefetchedWallpaper;
+      prefetchedWallpaper = null;
+      hideStatusMessage();
+      applyWallpaper(queued.imageUrl, queued.fileName, queued.wallpaperId, queued.preloadedMeta);
+      ensurePrefetch(settingsSig);
       return;
     }
 
@@ -543,12 +868,18 @@
         width: fresh.width,
         height: fresh.height
       });
-    } catch {
+      hideStatusMessage();
+      ensurePrefetch(settingsSig);
+    } catch (error) {
+      if (error && error.code === "NO_RESULTS") {
+        showStatusMessage("Sin resultados para esa busqueda. Ajusta q o relaja filtros.");
+      }
       if (cache?.imageUrl && cache.settingsSig === settingsSig) {
         applyWallpaper(cache.imageUrl, cache.fileName, cache.wallpaperId, {
           width: cache.width,
           height: cache.height
         });
+        ensurePrefetch(settingsSig);
       }
     }
   }
@@ -574,6 +905,7 @@
     currentSettings = getSettingsFromForm();
     setSettings(currentSettings);
     closeSettings();
+    clearPrefetchQueue();
 
     if (visualSettingsSignature(currentSettings) !== previousVisualSig) {
       reapplyVisualSettings();
@@ -581,6 +913,17 @@
     if (settingsSignature(currentSettings) !== previousSearchSig) {
       await loadWallpaper(true);
     }
+  });
+
+  settingsForm.addEventListener("input", () => {
+    lastResultsCheckSig = "";
+    setResultsInfoTone("");
+    setResultsInfo("Resultados estimados: cambios sin comprobar");
+    scheduleAutoResultsCheck();
+  });
+
+  settingsForm.addEventListener("change", () => {
+    scheduleAutoResultsCheck();
   });
 
   window.addEventListener("resize", () => {
@@ -604,6 +947,7 @@
 
   async function init() {
     currentSettings = getSettings();
+    loadFavorites();
     saveBtn.disabled = true;
     nextBtn.disabled = true;
     await loadWallpaper(false);

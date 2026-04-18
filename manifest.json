@@ -6,7 +6,7 @@
   "chrome_url_overrides": {
     "newtab": "newtab.html"
   },
-  "permissions": ["downloads"],
+  "permissions": ["downloads", "bookmarks"],
   "host_permissions": [
     "https://wallhaven.cc/*",
     "https://w.wallhaven.cc/*",

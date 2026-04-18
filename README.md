@@ -10,8 +10,13 @@ Extension MV3 para reemplazar la pestaña nueva con wallpapers de Wallhaven.
   - API key de Wallhaven (opcional)
   - filtros (`q`, categorias, purity, sorting, topRange, resolucion, ratio)
   - duracion de cache en minutos
-  - modo de ajuste de imagen y posicion
+  - modo de ajuste de imagen (`Ajuste con recorte`, `Ajuste sin recorte`, `Original`) y posicion
+- Indicador de resultados estimados con comprobacion automatica (debounce) y color segun calidad del pool.
+- Soporte de busqueda OR por comas en `q` (ej: `jujutsu kaisen, naruto, bleach`).
+- Mensaje de estado cuando no hay resultados para la busqueda actual.
+- Favoritos discretos en la esquina superior izquierda (`★`): menu hover con soporte de carpetas y subcarpetas.
 - Cache local para reducir requests.
+- Reserva de 1 wallpaper precargado en cola para cambios mas rapidos.
 - Transicion suave entre wallpapers.
 - Evita repetidos recientes con historial local de IDs.
 
@@ -47,10 +52,16 @@ Si nunca instalaste una extension manualmente, haz esto:
 - `↻`: cargar wallpaper nuevo.
 - `↓`: descargar wallpaper actual.
 - `⚙`: abrir configuracion.
+- `★`: abrir menu de favoritos (hover) con submenus de carpetas.
 
 ## Como usar `q` correctamente
 
 El campo `q` usa la misma sintaxis de busqueda de Wallhaven API v1.
+
+Ademas, esta extension soporta OR por comas:
+
+- `naruto, one piece, bleach` -> interpreta cada bloque como una busqueda separada y mezcla resultados.
+- Se aplica `trim` automatico por bloque.
 
 Patrones soportados:
 
@@ -73,6 +84,14 @@ Ejemplos utiles:
 
 Tip: para resultados consistentes, combina `q` con filtros de panel (categorias, purity, sorting, topRange, resolucion y ratio).
 
+### Sugerencias para mejores resultados
+
+- Evita filtros demasiado estrictos si quieres mas variedad.
+- Usa el indicador `Resultados estimados` del panel:
+  - rojo: pool muy bajo/sin resultados
+  - naranja/amarillo: pool medio
+  - verde: buen pool
+
 ## API de Wallhaven
 
 Documentacion oficial: https://wallhaven.cc/help/api
@@ -84,5 +103,6 @@ La extension guarda en `localStorage`:
 - configuracion (incluyendo API key si la ingresas)
 - ultimo wallpaper cacheado
 - historial limitado de IDs vistos
+- estado de busqueda y metadatos de prefetch
 
 No guarda automaticamente archivos de imagen en disco. Solo se descarga cuando usas el boton `↓`.
