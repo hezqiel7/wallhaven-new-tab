@@ -24,7 +24,7 @@
     atleast: "1920x1080",
     ratios: "16x9",
     cacheMinutes: 5,
-    fitMode: "smart",
+    fitMode: "contain",
     position: "center center"
   };
 
@@ -136,7 +136,7 @@
     const merged = mergeSettings(raw);
     const validSorting = ["date_added", "relevance", "random", "views", "favorites", "toplist"];
     const validTopRange = ["1d", "3d", "1w", "1M", "3M", "6M", "1y"];
-    const validFitModes = ["smart", "cover", "contain", "none"];
+    const validFitModes = ["cover", "contain", "none"];
     const validPositions = [
       "left top", "center top", "right top",
       "left center", "center center", "right center",
@@ -216,9 +216,6 @@
   function backgroundRenderOptions(settings, imageMeta) {
     const mode = settings.fitMode;
     const position = settings.position;
-    const viewportW = window.innerWidth || 1920;
-    const viewportH = window.innerHeight || 1080;
-    const hasSize = imageMeta && Number(imageMeta.width) > 0 && Number(imageMeta.height) > 0;
 
     if (mode === "none") {
       return { size: "auto", position, repeat: "no-repeat" };
@@ -228,14 +225,6 @@
     }
     if (mode === "contain") {
       return { size: "contain", position, repeat: "no-repeat" };
-    }
-
-    if (hasSize) {
-      const imageRatio = Number(imageMeta.width) / Number(imageMeta.height);
-      const viewRatio = viewportW / viewportH;
-      if (Math.abs(imageRatio - viewRatio) <= 0.01) {
-        return { size: "100% 100%", position, repeat: "no-repeat" };
-      }
     }
 
     return { size: "contain", position, repeat: "no-repeat" };
