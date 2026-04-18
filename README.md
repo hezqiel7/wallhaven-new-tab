@@ -48,6 +48,31 @@ Si nunca instalaste una extension manualmente, haz esto:
 - `↓`: descargar wallpaper actual.
 - `⚙`: abrir configuracion.
 
+## Como usar `q` correctamente
+
+El campo `q` usa la misma sintaxis de busqueda de Wallhaven API v1.
+
+Patrones soportados:
+
+- `tagname`: busca por tag/keyword.
+- `-tagname`: excluye un tag/keyword.
+- `+tag1 +tag2`: ambos tags son obligatorios.
+- `+tag1 -tag2`: incluye `tag1` y excluye `tag2`.
+- `@username`: wallpapers subidos por un usuario.
+- `id:123`: busqueda exacta por ID de tag (no se combina con otros terminos).
+- `type:jpg` o `type:png`: filtra por tipo de archivo.
+- `like:abc123`: busca wallpapers similares al wallpaper con ese ID.
+
+Ejemplos utiles:
+
+- `landscape -people -text -logo`
+- `+mountains +lake -anime`
+- `@wallpaperuser`
+- `type:jpg landscape forest`
+- `like:94x38z`
+
+Tip: para resultados consistentes, combina `q` con filtros de panel (categorias, purity, sorting, topRange, resolucion y ratio).
+
 ## API de Wallhaven
 
 Documentacion oficial: https://wallhaven.cc/help/api
