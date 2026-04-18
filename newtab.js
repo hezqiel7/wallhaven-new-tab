@@ -564,7 +564,7 @@
 
     prefetchPromise = (async () => {
       try {
-        const payload = await fetchWallpaper(snapshot, snapshotSig, currentImageUrl);
+        const payload = await fetchWallpaper(snapshot, snapshotSig, currentImageUrl, false);
         const preloadedMeta = await preloadImage(payload.imageUrl);
         if (!currentSettings || settingsSignature(currentSettings) !== snapshotSig) {
           return;
@@ -679,7 +679,7 @@
     return res.json();
   }
 
-  async function fetchWallpaper(settings, settingsSig, avoidUrl) {
+  async function fetchWallpaper(settings, settingsSig, avoidUrl, writeCache = true) {
     const headers = {};
     if (settings.apiKey) {
       headers["X-API-Key"] = settings.apiKey;
@@ -729,7 +729,9 @@
         settingsSig
       };
 
-      setCache(payload);
+      if (writeCache) {
+        setCache(payload);
+      }
       return payload;
     }
 
@@ -763,7 +765,9 @@
         settingsSig
       };
 
-      setCache(payload);
+      if (writeCache) {
+        setCache(payload);
+      }
       return payload;
     }
 
@@ -858,6 +862,15 @@
       prefetchedWallpaper = null;
       hideStatusMessage();
       applyWallpaper(queued.imageUrl, queued.fileName, queued.wallpaperId, queued.preloadedMeta);
+      setCache({
+        ts: now(),
+        imageUrl: queued.imageUrl,
+        fileName: queued.fileName,
+        wallpaperId: queued.wallpaperId,
+        width: Number(queued.width) || Number(queued.preloadedMeta?.width) || 0,
+        height: Number(queued.height) || Number(queued.preloadedMeta?.height) || 0,
+        settingsSig
+      });
       ensurePrefetch(settingsSig);
       return;
     }
