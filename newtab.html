@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>New Tab</title>
+  <link rel="stylesheet" href="newtab.css">
+</head>
+<body>
+  <div id="bgStack" aria-hidden="true">
+    <div id="bgA" class="bg-layer active"></div>
+    <div id="bgB" class="bg-layer"></div>
+  </div>
+
+  <button id="nextBtn" title="Nuevo wallpaper" aria-label="Nuevo wallpaper">
+  ↻
+</button>
+<button id="saveBtn" title="Guardar wallpaper" aria-label="Guardar wallpaper">
+  ↓
+</button>
+<button id="settingsBtn" title="Configuracion" aria-label="Configuracion">
+  ⚙
+</button>
+
+  <div id="settingsPanel" class="hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <form id="settingsForm">
+      <h2 id="settingsTitle">Wallhaven</h2>
+
+      <label>
+        API Key
+        <input id="apiKeyInput" name="apiKey" type="password" autocomplete="off" placeholder="Opcional">
+      </label>
+
+      <label>
+        Busqueda (q)
+        <input id="queryInput" name="query" type="text" autocomplete="off" placeholder="landscape -logo">
+      </label>
+
+      <fieldset>
+        <legend>Categorias</legend>
+        <label><input id="catGeneral" type="checkbox"> General</label>
+        <label><input id="catAnime" type="checkbox"> Anime</label>
+        <label><input id="catPeople" type="checkbox"> People</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Purity</legend>
+        <label><input id="puritySfw" type="checkbox"> SFW</label>
+        <label><input id="puritySketchy" type="checkbox"> Sketchy</label>
+        <label><input id="purityNsfw" type="checkbox"> NSFW</label>
+      </fieldset>
+
+      <label>
+        Sorting
+        <select id="sortingInput" name="sorting">
+          <option value="toplist">toplist</option>
+          <option value="random">random</option>
+          <option value="favorites">favorites</option>
+          <option value="views">views</option>
+          <option value="date_added">date_added</option>
+          <option value="relevance">relevance</option>
+        </select>
+      </label>
+
+      <label>
+        Top Range
+        <select id="topRangeInput" name="topRange">
+          <option value="1d">1d</option>
+          <option value="3d">3d</option>
+          <option value="1w">1w</option>
+          <option value="1M">1M</option>
+          <option value="3M">3M</option>
+          <option value="6M">6M</option>
+          <option value="1y">1y</option>
+        </select>
+      </label>
+
+      <label>
+        Resolucion minima
+        <input id="atleastInput" name="atleast" type="text" autocomplete="off" placeholder="1920x1080">
+      </label>
+
+      <label>
+        Ratio
+        <input id="ratiosInput" name="ratios" type="text" autocomplete="off" placeholder="16x9,21x9">
+      </label>
+
+      <label>
+        Duracion del wallpaper (min)
+        <input id="cacheMinutesInput" name="cacheMinutes" type="number" min="1" max="1440" step="1" placeholder="5">
+      </label>
+
+      <label>
+        Modo de ajuste
+        <select id="fitModeInput" name="fitMode">
+          <option value="smart">Smart (recomendado)</option>
+          <option value="cover">Fill con recorte</option>
+          <option value="contain">Completa con bandas</option>
+          <option value="none">Original sin escalar</option>
+        </select>
+      </label>
+
+      <label>
+        Posicion de imagen
+        <select id="positionInput" name="position">
+          <option value="left top">Left Top</option>
+          <option value="center top">Center Top</option>
+          <option value="right top">Right Top</option>
+          <option value="left center">Left Center</option>
+          <option value="center center">Center</option>
+          <option value="right center">Right Center</option>
+          <option value="left bottom">Left Bottom</option>
+          <option value="center bottom">Center Bottom</option>
+          <option value="right bottom">Right Bottom</option>
+        </select>
+      </label>
+
+      <div class="settings-actions">
+        <button id="cancelSettingsBtn" type="button">Cancelar</button>
+        <button id="saveSettingsBtn" type="submit">Guardar</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="newtab.js"></script>
+</body>
+</html>

@@ -1,0 +1,184 @@
+:root {
+  color-scheme: dark;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+  font-family: system-ui, sans-serif;
+}
+
+#bgStack {
+  position: fixed;
+  inset: 0;
+  transform: translateZ(0);
+}
+
+#bgStack::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,.14);
+  pointer-events: none;
+}
+
+.bg-layer {
+  position: absolute;
+  inset: 0;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  opacity: 0;
+  transition: opacity .42s ease;
+  will-change: opacity;
+}
+
+.bg-layer.active {
+  opacity: 1;
+}
+
+#nextBtn,
+#saveBtn,
+#settingsBtn {
+  position: fixed;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(20,20,20,.28);
+  color: rgba(255,255,255,.88);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 30px;
+  text-align: center;
+  opacity: .28;
+  transition: opacity .15s ease, transform .15s ease, background .15s ease;
+  padding: 0;
+}
+
+#nextBtn:hover,
+#saveBtn:hover,
+#settingsBtn:hover {
+  opacity: .9;
+  transform: scale(1.05);
+  background: rgba(20,20,20,.45);
+}
+
+#nextBtn {
+  right: 84px;
+  bottom: 12px;
+}
+
+#saveBtn {
+  right: 48px;
+  bottom: 12px;
+}
+
+#settingsBtn {
+  right: 12px;
+  bottom: 12px;
+}
+
+#settingsPanel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 10;
+}
+
+#settingsPanel.hidden {
+  display: none;
+}
+
+#settingsForm {
+  width: min(420px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(18, 18, 18, 0.92);
+  color: #f2f2f2;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  color-scheme: dark;
+}
+
+#settingsForm h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+#settingsForm label,
+#settingsForm fieldset {
+  display: block;
+  margin: 0 0 10px;
+}
+
+#settingsForm input,
+#settingsForm select {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f2f2;
+  padding: 8px;
+  font-size: 12px;
+}
+
+#settingsForm select,
+#settingsForm option,
+#settingsForm optgroup {
+  background-color: #161616;
+  color: #f2f2f2;
+}
+
+#settingsForm fieldset {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+#settingsForm fieldset label {
+  display: inline-flex;
+  gap: 6px;
+  margin-right: 10px;
+  align-items: center;
+}
+
+#settingsForm fieldset input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-actions button {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+#saveSettingsBtn {
+  background: rgba(120, 180, 255, 0.7);
+  color: #111;
+}

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Wallhaven New Tab Lite",
+  "version": "1.0.0",
+  "description": "Nueva pestaña ultra ligera con wallpapers de Wallhaven y caché de 5 minutos.",
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "permissions": ["downloads"],
+  "host_permissions": [
+    "https://wallhaven.cc/*",
+    "https://w.wallhaven.cc/*",
+    "https://th.wallhaven.cc/*"
+  ]
+}
