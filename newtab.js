@@ -4,8 +4,13 @@
   const CACHE_KEY = "wh_newtab_cache_v2";
   const SETTINGS_KEY = "wh_newtab_settings_v1";
   const HISTORY_KEY = "wh_newtab_history_v1";
-  const HISTORY_LIMIT = 120;
+  const CANDIDATE_POOL_KEY = "wh_newtab_pool_v1";
+  const QUERY_GROUP_STATE_KEY = "wh_newtab_group_state_v1";
+  const HISTORY_LIMIT = 200;
   const MAX_QUERY_GROUPS = 5;
+  const POOL_LOW_WATERMARK = 8;
+  const POOL_MAX_ITEMS = 240;
+  const HISTORY_RELAX_STEP = 24;
   const API_BASE_URL = "https://wallhaven.cc/api/v1/search";
   const DEFAULT_SETTINGS = {
     apiKey: "",
@@ -34,6 +39,7 @@
   const bgLayers = [bgA, bgB];
   const nextBtn = document.getElementById("nextBtn");
   const saveBtn = document.getElementById("saveBtn");
+  const favBtn = document.getElementById("favBtn");
   const settingsBtn = document.getElementById("settingsBtn");
   const statusMessage = document.getElementById("statusMessage");
   const favoritesDock = document.getElementById("favoritesDock");
@@ -62,6 +68,7 @@
   let currentImageUrl = "";
   let currentFileName = "";
   let currentWallpaperId = "";
+  let currentWallpaperPageUrl = "";
   let activeLayerIndex = 0;
   let currentSettings = null;
   let prefetchedWallpaper = null;
@@ -90,6 +97,63 @@
     localStorage.setItem(CACHE_KEY, JSON.stringify(data));
   }
 
+  function getCandidatePoolState() {
+    const raw = safeParse(localStorage.getItem(CANDIDATE_POOL_KEY));
+    if (!raw || typeof raw !== "object") {
+      return { settingsSig: "", items: [] };
+    }
+    const items = Array.isArray(raw.items) ? raw.items : [];
+    return {
+      settingsSig: typeof raw.settingsSig === "string" ? raw.settingsSig : "",
+      items
+    };
+  }
+
+  function setCandidatePoolState(settingsSig, items) {
+    localStorage.setItem(CANDIDATE_POOL_KEY, JSON.stringify({
+      settingsSig,
+      items: Array.isArray(items) ? items.slice(0, POOL_MAX_ITEMS) : []
+    }));
+  }
+
+  function getCandidatePool(settingsSig) {
+    const state = getCandidatePoolState();
+    if (state.settingsSig !== settingsSig) {
+      return [];
+    }
+    return state.items;
+  }
+
+  function setCandidatePool(settingsSig, items) {
+    setCandidatePoolState(settingsSig, items);
+  }
+
+  function clearCandidatePool() {
+    localStorage.removeItem(CANDIDATE_POOL_KEY);
+  }
+
+  function getQueryGroupState() {
+    const raw = safeParse(localStorage.getItem(QUERY_GROUP_STATE_KEY));
+    if (!raw || typeof raw !== "object") {
+      return { settingsSig: "", groups: [] };
+    }
+    return {
+      settingsSig: typeof raw.settingsSig === "string" ? raw.settingsSig : "",
+      groups: Array.isArray(raw.groups) ? raw.groups : []
+    };
+  }
+
+  function setQueryGroupState(settingsSig, groups) {
+    localStorage.setItem(QUERY_GROUP_STATE_KEY, JSON.stringify({
+      settingsSig,
+      groups: Array.isArray(groups) ? groups : []
+    }));
+  }
+
+  function clearQueryGroupState() {
+    localStorage.removeItem(QUERY_GROUP_STATE_KEY);
+  }
+
   function getHistory() {
     const raw = safeParse(localStorage.getItem(HISTORY_KEY));
     if (!Array.isArray(raw)) return [];
@@ -100,19 +164,28 @@
     localStorage.setItem(HISTORY_KEY, JSON.stringify(ids.slice(-HISTORY_LIMIT)));
   }
 
-  function rememberWallpaper(id) {
-    if (!id) return;
-    const history = getHistory().filter((value) => value !== id);
-    history.push(id);
+  function wallpaperHistoryKey(id, url) {
+    if (id) return `id:${id}`;
+    if (url) return `url:${url}`;
+    return "";
+  }
+
+  function rememberWallpaper(id, url) {
+    const key = wallpaperHistoryKey(id, url);
+    if (!key) return;
+
+    const history = getHistory().filter((value) => value !== key);
+    history.push(key);
     setHistory(history);
   }
 
-  function clearHistory(keepId) {
-    if (keepId) {
-      setHistory([keepId]);
-      return;
+  function relaxHistory(step = HISTORY_RELAX_STEP) {
+    const history = getHistory();
+    if (history.length <= step) {
+      return false;
     }
-    localStorage.removeItem(HISTORY_KEY);
+    setHistory(history.slice(step));
+    return true;
   }
 
   function escapeHtml(value) {
@@ -226,7 +299,7 @@
     const purity = src.purity || {};
     return {
       apiKey: typeof src.apiKey === "string" ? src.apiKey.trim() : DEFAULT_SETTINGS.apiKey,
-      query: typeof src.query === "string" && src.query.trim() ? src.query.trim() : DEFAULT_SETTINGS.query,
+      query: typeof src.query === "string" ? src.query.trim() : DEFAULT_SETTINGS.query,
       categories: {
         general: categories.general !== false,
         anime: !!categories.anime,
@@ -352,10 +425,11 @@
     layer.style.backgroundRepeat = render.repeat;
   }
 
-  function applyWallpaper(imageUrl, fileName, wallpaperId, imageMeta) {
+  function applyWallpaper(imageUrl, fileName, wallpaperId, wallpaperPageUrl, imageMeta) {
     currentImageUrl = imageUrl;
     currentFileName = fileName || `wallhaven-${Date.now()}.jpg`;
     currentWallpaperId = wallpaperId || "";
+    currentWallpaperPageUrl = wallpaperPageUrl || (currentWallpaperId ? `https://wallhaven.cc/w/${currentWallpaperId}` : "");
 
     const nextLayerIndex = activeLayerIndex === 0 ? 1 : 0;
     const activeLayer = bgLayers[activeLayerIndex];
@@ -370,7 +444,18 @@
     activeLayerIndex = nextLayerIndex;
 
     saveBtn.disabled = false;
-    rememberWallpaper(currentWallpaperId);
+    updateFavButtonVisibility();
+    rememberWallpaper(currentWallpaperId, currentImageUrl);
+  }
+
+  function updateFavButtonVisibility() {
+    const hasApiKey = !!(currentSettings && currentSettings.apiKey);
+    const hasPageUrl = !!currentWallpaperPageUrl;
+    if (hasApiKey && hasPageUrl) {
+      favBtn.classList.remove("hidden");
+      return;
+    }
+    favBtn.classList.add("hidden");
   }
 
   function preloadImage(url, timeoutMs = 15000) {
@@ -412,9 +497,9 @@
     });
   }
 
-  async function applyWallpaperSmooth(imageUrl, fileName, wallpaperId, imageMeta) {
+  async function applyWallpaperSmooth(imageUrl, fileName, wallpaperId, wallpaperPageUrl, imageMeta) {
     const preloaded = await preloadImage(imageUrl);
-    applyWallpaper(imageUrl, fileName, wallpaperId, imageMeta || preloaded);
+    applyWallpaper(imageUrl, fileName, wallpaperId, wallpaperPageUrl, imageMeta || preloaded);
   }
 
   function reapplyVisualSettings() {
@@ -547,6 +632,198 @@
     return error;
   }
 
+  function makeCandidateFromItem(item, settingsSig) {
+    if (!item || !item.path) {
+      return null;
+    }
+    return {
+      imageUrl: item.path,
+      fileName: fileNameFromUrl(item.path),
+      wallpaperId: item.id || "",
+      wallpaperPageUrl: item.url || "",
+      width: Number(item.dimension_x) || 0,
+      height: Number(item.dimension_y) || 0,
+      settingsSig
+    };
+  }
+
+  function candidateKey(candidate) {
+    if (!candidate) return "";
+    return wallpaperHistoryKey(candidate.wallpaperId, candidate.imageUrl);
+  }
+
+  function shuffleInPlace(list) {
+    for (let i = list.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = list[i];
+      list[i] = list[j];
+      list[j] = tmp;
+    }
+  }
+
+  function getSeenHistoryKeys() {
+    const set = new Set();
+    const history = getHistory();
+    for (const entry of history) {
+      if (!entry) continue;
+      set.add(entry);
+      if (!entry.startsWith("id:") && !entry.startsWith("url:")) {
+        set.add(`id:${entry}`);
+      }
+    }
+    return set;
+  }
+
+  function getOrCreateGroupState(settings, settingsSig) {
+    const queries = parseQueryGroups(settings.query);
+    const stored = getQueryGroupState();
+
+    const canReuse = stored.settingsSig === settingsSig
+      && Array.isArray(stored.groups)
+      && stored.groups.length === queries.length
+      && stored.groups.every((group, index) => group && group.query === queries[index]);
+
+    if (canReuse) {
+      const normalized = queries.map((query, index) => {
+        const prev = stored.groups[index] || {};
+        return {
+          query,
+          pageCursor: Number.isFinite(Number(prev.pageCursor)) && Number(prev.pageCursor) > 0 ? Number(prev.pageCursor) : 1,
+          lastPage: Number.isFinite(Number(prev.lastPage)) && Number(prev.lastPage) > 0 ? Number(prev.lastPage) : 1
+        };
+      });
+      return normalized;
+    }
+
+    return queries.map((query) => ({
+      query,
+      pageCursor: 1,
+      lastPage: 1
+    }));
+  }
+
+  async function refillCandidatePool(settings, settingsSig) {
+    const headers = {};
+    if (settings.apiKey) {
+      headers["X-API-Key"] = settings.apiKey;
+    }
+
+    const groups = getOrCreateGroupState(settings, settingsSig);
+    const pool = getCandidatePool(settingsSig);
+    const poolKeys = new Set(pool.map((item) => candidateKey(item)).filter(Boolean));
+
+    const seenKeys = getSeenHistoryKeys();
+    const currentKey = wallpaperHistoryKey(currentWallpaperId, currentImageUrl);
+    if (currentKey) {
+      seenKeys.add(currentKey);
+    }
+    if (prefetchedWallpaper) {
+      const prefetchKey = candidateKey(prefetchedWallpaper);
+      if (prefetchKey) {
+        seenKeys.add(prefetchKey);
+      }
+    }
+
+    let hasAnyResults = false;
+    const additions = [];
+
+    for (const group of groups) {
+      const page = group.pageCursor;
+      const json = await requestSearchPage(settings, headers, page, group.query);
+
+      const total = Number(json?.meta?.total);
+      if (Number.isFinite(total) && total > 0) {
+        hasAnyResults = true;
+      }
+
+      const parsedLastPage = Number(json?.meta?.last_page);
+      if (Number.isFinite(parsedLastPage) && parsedLastPage > 0) {
+        group.lastPage = Math.min(parsedLastPage, 1000);
+      } else {
+        group.lastPage = 1;
+      }
+      group.pageCursor = page >= group.lastPage ? 1 : (page + 1);
+
+      const items = Array.isArray(json?.data) ? json.data : [];
+      for (const item of items) {
+        const candidate = makeCandidateFromItem(item, settingsSig);
+        if (!candidate || !candidate.imageUrl) continue;
+        if (candidate.imageUrl === currentImageUrl) continue;
+
+        const key = candidateKey(candidate);
+        if (!key) continue;
+        if (seenKeys.has(key)) continue;
+        if (poolKeys.has(key)) continue;
+
+        poolKeys.add(key);
+        additions.push(candidate);
+      }
+    }
+
+    setQueryGroupState(settingsSig, groups);
+
+    if (additions.length) {
+      shuffleInPlace(additions);
+      const merged = pool.concat(additions).slice(0, POOL_MAX_ITEMS);
+      setCandidatePool(settingsSig, merged);
+    }
+
+    return {
+      added: additions.length,
+      hasAnyResults
+    };
+  }
+
+  function popCandidateFromPool(settingsSig) {
+    const pool = getCandidatePool(settingsSig);
+    if (!pool.length) {
+      return null;
+    }
+    const [first, ...rest] = pool;
+    setCandidatePool(settingsSig, rest);
+    return first;
+  }
+
+  async function getNextCandidate(settings, settingsSig) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const fromPool = popCandidateFromPool(settingsSig);
+      if (fromPool) {
+        return fromPool;
+      }
+
+      const refill = await refillCandidatePool(settings, settingsSig);
+      if (!refill.hasAnyResults) {
+        throw createNoResultsError();
+      }
+
+      if (refill.added === 0) {
+        if (!relaxHistory()) {
+          break;
+        }
+      }
+    }
+
+    throw new Error("No wallpaper candidate available");
+  }
+
+  async function ensurePoolLevel(settings, settingsSig, targetSize = POOL_LOW_WATERMARK) {
+    let pool = getCandidatePool(settingsSig);
+    let safety = 0;
+    while (pool.length < targetSize && safety < 4) {
+      safety += 1;
+      let refill;
+      try {
+        refill = await refillCandidatePool(settings, settingsSig);
+      } catch {
+        break;
+      }
+      pool = getCandidatePool(settingsSig);
+      if (refill.added === 0) {
+        break;
+      }
+    }
+  }
+
   function canUsePrefetched(settingsSig) {
     return !!prefetchedWallpaper
       && prefetchedWallpaper.settingsSig === settingsSig
@@ -555,7 +832,7 @@
   }
 
   function ensurePrefetch(settingsSig) {
-    if (prefetchPromise || !currentSettings) {
+    if (prefetchPromise || !currentSettings || prefetchedWallpaper) {
       return;
     }
 
@@ -564,7 +841,7 @@
 
     prefetchPromise = (async () => {
       try {
-        const payload = await fetchWallpaper(snapshot, snapshotSig, currentImageUrl, false);
+        const payload = await getNextCandidate(snapshot, snapshotSig);
         const preloadedMeta = await preloadImage(payload.imageUrl);
         if (!currentSettings || settingsSignature(currentSettings) !== snapshotSig) {
           return;
@@ -637,34 +914,6 @@
     return `${API_BASE_URL}?${params.toString()}`;
   }
 
-  function pickItem(items, avoidUrl, seenIds) {
-    if (!Array.isArray(items) || !items.length) {
-      return null;
-    }
-
-    const candidates = items.filter((item) => {
-      if (!item || !item.path) return false;
-      if (avoidUrl && item.path === avoidUrl) return false;
-      if (item.id && seenIds && seenIds.has(item.id)) return false;
-      return true;
-    });
-
-    const source = candidates.length ? candidates : items;
-    const index = Math.floor(Math.random() * source.length);
-    return source[index] || null;
-  }
-
-  function randomInt(min, max) {
-    if (max <= min) return min;
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-  }
-
-  function pickPage(attempt, lastPage) {
-    if (lastPage <= 1) return 1;
-    if (attempt === 0) return randomInt(1, Math.min(10, lastPage));
-    return randomInt(1, lastPage);
-  }
-
   async function requestSearchPage(settings, headers, page, queryOverride) {
     const res = await fetch(buildSearchUrl(settings, page, queryOverride), {
       method: "GET",
@@ -679,105 +928,6 @@
     return res.json();
   }
 
-  async function fetchWallpaper(settings, settingsSig, avoidUrl, writeCache = true) {
-    const headers = {};
-    if (settings.apiKey) {
-      headers["X-API-Key"] = settings.apiKey;
-    }
-
-    const seenIds = new Set(getHistory());
-    if (currentWallpaperId) {
-      seenIds.add(currentWallpaperId);
-    }
-
-    const queries = parseQueryGroups(settings.query);
-    const randomQueryOffset = randomInt(0, queries.length - 1);
-    let hasAnyResults = false;
-
-    let lastPage = 1;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const page = pickPage(attempt, lastPage);
-      const query = queries[(attempt + randomQueryOffset) % queries.length];
-      const json = await requestSearchPage(settings, headers, page, query);
-      const total = Number(json?.meta?.total);
-      if (Number.isFinite(total) && total <= 0) {
-        continue;
-      }
-      if (Number.isFinite(total) && total > 0) {
-        hasAnyResults = true;
-      }
-      const parsedLastPage = Number(json?.meta?.last_page);
-      if (Number.isFinite(parsedLastPage) && parsedLastPage > 0) {
-        lastPage = Math.min(parsedLastPage, 1000);
-      }
-
-      const item = pickItem(json?.data, avoidUrl, seenIds);
-      if (!item?.path) {
-        continue;
-      }
-
-      const imageUrl = item.path;
-      const fileName = fileNameFromUrl(imageUrl);
-
-      const payload = {
-        ts: now(),
-        imageUrl,
-        fileName,
-        wallpaperId: item.id || "",
-        width: Number(item.dimension_x) || 0,
-        height: Number(item.dimension_y) || 0,
-        settingsSig
-      };
-
-      if (writeCache) {
-        setCache(payload);
-      }
-      return payload;
-    }
-
-    clearHistory(currentWallpaperId);
-
-    for (const query of queries) {
-      const fallbackJson = await requestSearchPage(settings, headers, 1, query);
-      const fallbackTotal = Number(fallbackJson?.meta?.total);
-      if (Number.isFinite(fallbackTotal) && fallbackTotal > 0) {
-        hasAnyResults = true;
-      }
-      if (Number.isFinite(fallbackTotal) && fallbackTotal <= 0) {
-        continue;
-      }
-
-      const fallbackItem = pickItem(fallbackJson?.data, avoidUrl, new Set());
-      if (!fallbackItem?.path) {
-        continue;
-      }
-
-      const imageUrl = fallbackItem.path;
-      const fileName = fileNameFromUrl(imageUrl);
-
-      const payload = {
-        ts: now(),
-        imageUrl,
-        fileName,
-        wallpaperId: fallbackItem.id || "",
-        width: Number(fallbackItem.dimension_x) || 0,
-        height: Number(fallbackItem.dimension_y) || 0,
-        settingsSig
-      };
-
-      if (writeCache) {
-        setCache(payload);
-      }
-      return payload;
-    }
-
-    if (!hasAnyResults) {
-      throw createNoResultsError();
-    }
-
-    throw new Error("No wallpaper returned by Wallhaven");
-  }
-
   saveBtn.addEventListener("click", () => {
     if (!currentImageUrl) return;
 
@@ -787,6 +937,11 @@
       saveAs: false,
       conflictAction: "uniquify"
     });
+  }, { passive: true });
+
+  favBtn.addEventListener("click", () => {
+    if (!currentWallpaperPageUrl) return;
+    window.open(currentWallpaperPageUrl, "_blank", "noopener,noreferrer");
   }, { passive: true });
 
   function setFormFromSettings(settings) {
@@ -849,10 +1004,11 @@
 
     if (!force && isFresh(cache, settingsSig, ttlMs)) {
       hideStatusMessage();
-      applyWallpaper(cache.imageUrl, cache.fileName, cache.wallpaperId, {
+      applyWallpaper(cache.imageUrl, cache.fileName, cache.wallpaperId, cache.wallpaperPageUrl, {
         width: cache.width,
         height: cache.height
       });
+      await ensurePoolLevel(currentSettings, settingsSig, POOL_LOW_WATERMARK);
       ensurePrefetch(settingsSig);
       return;
     }
@@ -861,37 +1017,51 @@
       const queued = prefetchedWallpaper;
       prefetchedWallpaper = null;
       hideStatusMessage();
-      applyWallpaper(queued.imageUrl, queued.fileName, queued.wallpaperId, queued.preloadedMeta);
+      applyWallpaper(queued.imageUrl, queued.fileName, queued.wallpaperId, queued.wallpaperPageUrl, queued.preloadedMeta);
       setCache({
         ts: now(),
         imageUrl: queued.imageUrl,
         fileName: queued.fileName,
         wallpaperId: queued.wallpaperId,
+        wallpaperPageUrl: queued.wallpaperPageUrl || "",
         width: Number(queued.width) || Number(queued.preloadedMeta?.width) || 0,
         height: Number(queued.height) || Number(queued.preloadedMeta?.height) || 0,
         settingsSig
       });
+      await ensurePoolLevel(currentSettings, settingsSig, POOL_LOW_WATERMARK);
       ensurePrefetch(settingsSig);
       return;
     }
 
     try {
-      const fresh = await fetchWallpaper(currentSettings, settingsSig, force ? currentImageUrl : "");
-      await applyWallpaperSmooth(fresh.imageUrl, fresh.fileName, fresh.wallpaperId, {
+      const fresh = await getNextCandidate(currentSettings, settingsSig);
+      await applyWallpaperSmooth(fresh.imageUrl, fresh.fileName, fresh.wallpaperId, fresh.wallpaperPageUrl, {
         width: fresh.width,
         height: fresh.height
       });
+      setCache({
+        ts: now(),
+        imageUrl: fresh.imageUrl,
+        fileName: fresh.fileName,
+        wallpaperId: fresh.wallpaperId,
+        wallpaperPageUrl: fresh.wallpaperPageUrl || "",
+        width: Number(fresh.width) || 0,
+        height: Number(fresh.height) || 0,
+        settingsSig
+      });
       hideStatusMessage();
+      await ensurePoolLevel(currentSettings, settingsSig, POOL_LOW_WATERMARK);
       ensurePrefetch(settingsSig);
     } catch (error) {
       if (error && error.code === "NO_RESULTS") {
         showStatusMessage("Sin resultados para esa busqueda. Ajusta q o relaja filtros.");
       }
       if (cache?.imageUrl && cache.settingsSig === settingsSig) {
-        applyWallpaper(cache.imageUrl, cache.fileName, cache.wallpaperId, {
+        applyWallpaper(cache.imageUrl, cache.fileName, cache.wallpaperId, cache.wallpaperPageUrl, {
           width: cache.width,
           height: cache.height
         });
+        await ensurePoolLevel(currentSettings, settingsSig, POOL_LOW_WATERMARK);
         ensurePrefetch(settingsSig);
       }
     }
@@ -916,14 +1086,21 @@
     const previousVisualSig = visualSettingsSignature(currentSettings);
 
     currentSettings = getSettingsFromForm();
+    const nextSearchSig = settingsSignature(currentSettings);
     setSettings(currentSettings);
     closeSettings();
-    clearPrefetchQueue();
+
+    if (nextSearchSig !== previousSearchSig) {
+      clearPrefetchQueue();
+      clearCandidatePool();
+      clearQueryGroupState();
+    }
 
     if (visualSettingsSignature(currentSettings) !== previousVisualSig) {
       reapplyVisualSettings();
     }
-    if (settingsSignature(currentSettings) !== previousSearchSig) {
+    updateFavButtonVisibility();
+    if (nextSearchSig !== previousSearchSig) {
       await loadWallpaper(true);
     }
   });
@@ -960,6 +1137,7 @@
 
   async function init() {
     currentSettings = getSettings();
+    updateFavButtonVisibility();
     loadFavorites();
     saveBtn.disabled = true;
     nextBtn.disabled = true;

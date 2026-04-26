@@ -42,6 +42,7 @@ html, body {
 
 #nextBtn,
 #saveBtn,
+#favBtn,
 #settingsBtn {
   position: fixed;
   width: 30px;
@@ -63,6 +64,7 @@ html, body {
 
 #nextBtn:hover,
 #saveBtn:hover,
+#favBtn:hover,
 #settingsBtn:hover {
   opacity: .9;
   transform: scale(1.05);
@@ -70,11 +72,16 @@ html, body {
 }
 
 #nextBtn {
-  right: 84px;
+  right: 120px;
   bottom: 12px;
 }
 
 #saveBtn {
+  right: 84px;
+  bottom: 12px;
+}
+
+#favBtn {
   right: 48px;
   bottom: 12px;
 }
@@ -82,6 +89,10 @@ html, body {
 #settingsBtn {
   right: 12px;
   bottom: 12px;
+}
+
+#favBtn.hidden {
+  display: none;
 }
 
 #statusMessage {
